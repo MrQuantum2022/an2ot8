@@ -170,13 +170,23 @@ def get_comments_for_section(batch_id, section_number, total_batch_size):
     except Exception as e:
         st.error(f"Error fetching comments for section: {e}")
         return []
-
-def save_annotation(comment_id, user_email, label, categories, notes):
-    """Save annotation to database"""
+# The new function signature now includes batch_id
+def save_annotation(comment_id, batch_id, user_email, label, categories, notes):
+    """Save annotation to database, now including the batch_id."""
     try:
-        annotation_data = {'comment_id': comment_id, 'user_id': user_email, 'label': label, 'categories': categories, 'notes': notes}
+        annotation_data = {
+            'comment_id': comment_id,
+            'batch_id': batch_id, # Add batch_id to the data
+            'user_id': user_email,
+            'label': label,
+            'categories': categories,
+            'notes': notes
+        }
         supabase.table('annotations').insert(annotation_data).execute()
-        supabase.table('comments').update({'status': 'annotated'}).eq('id', comment_id).execute()
+        
+        # We no longer update the comment's status, as it can be annotated in other batches.
+        # supabase.table('comments').update({'status': 'annotated'}).eq('id', comment_id).execute()
+        
         return True
     except Exception as e:
         st.error(f"Error saving annotation: {str(e)}")
@@ -287,11 +297,9 @@ def main_app():
                 if section_number is not None:
                     st.session_state.assigned_section_number = section_number
                     
-                    # --- CHANGED LINES START ---
                     # We now pass the total count from the batch object to the function.
                     total_comments_in_batch = batch.get('comment_count', 0)
                     comments = get_comments_for_section(batch['id'], section_number, total_comments_in_batch)
-                    # --- CHANGED LINES END ---
 
                     if comments:
                         st.session_state.section_comments = comments
@@ -340,7 +348,8 @@ def main_app():
                 submit, skip = st.columns(2)
                 with submit:
                     if st.form_submit_button("✅ Save Annotation", use_container_width=True, type="primary"):
-                        if save_annotation(current_comment['id'], user_email, label, categories, notes):
+                        # --- THIS IS THE UPDATED LINE ---
+                        if save_annotation(current_comment['id'], batch['id'], user_email, label, categories, notes):
                             st.success("Annotation saved!")
                             st.session_state.current_comment_index += 1
                             st.rerun()
