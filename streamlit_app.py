@@ -106,18 +106,26 @@ def get_available_batches():
 def get_batch_progress(batch_id):
     """Get progress statistics for a batch"""
     try:
-        # Get total comments in batch
-        total_response = supabase.table('comments').select('id').eq('batch_id', batch_id).execute()
-        total_count = len(total_response.data)
+        # Get total comments in batch using the database's count feature
+        total_response = supabase.table('comments') \
+                                 .select('*', count='exact') \
+                                 .eq('batch_id', batch_id) \
+                                 .execute()
+        total_count = total_response.count
         
-        # Get annotated comments count
-        annotated_response = supabase.table('comments').select('id').eq('batch_id', batch_id).eq('status', 'annotated').execute()
-        annotated_count = len(annotated_response.data)
+        # Get annotated comments count efficiently
+        annotated_response = supabase.table('comments') \
+                                     .select('*', count='exact') \
+                                     .eq('batch_id', batch_id) \
+                                     .eq('status', 'annotated') \
+                                     .execute()
+        annotated_count = annotated_response.count
         
         return total_count, annotated_count
     except Exception as e:
         st.error(f"Error getting batch progress: {str(e)}")
         return 0, 0
+
 
 def get_user_stats(user_email):
     """Get user annotation statistics"""
