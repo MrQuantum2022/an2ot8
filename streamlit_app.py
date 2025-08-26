@@ -10,14 +10,24 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize Supabase client
-@st.cache_resource
+# In streamlit_app.py
+print("--- Environment Check ---")
+key_loaded = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+if key_loaded:
+    print("✅ Service Key was found.")
+else:
+    print("❌ Service Key NOT found. The .env file was likely not loaded correctly.")
+print("-----------------------")
+
 def init_supabase():
     """Initialize Supabase client with credentials from environment variables"""
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_ANON_KEY")
+    # WARNING: Use the Service Role Key for this feature.
+    # Keep this key secure and never expose it in client-side code.
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") 
     
     if not url or not key:
-        st.error("Missing Supabase credentials. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your environment variables.")
+        st.error("Missing Supabase credentials. Please add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to your environment variables.")
         st.stop()
     
     return create_client(url, key)
@@ -45,8 +55,8 @@ def init_session_state():
 
 def authenticate_user():
     """Supabase authentication"""
-    st.title("🏷️ Comment Annotation Tool")
-    
+    st.title("💻An2ot8")
+
     try:
         user = supabase.auth.get_user()
         if user and user.user:
@@ -85,7 +95,7 @@ def authenticate_user():
                 try:
                     response = supabase.auth.sign_up({"email": signup_email, "password": signup_password})
                     if response.user:
-                        st.success("Account created successfully! Please check your email to verify your account.")
+                        st.success("Account created successfully!")
                 except Exception as e:
                     st.error(f"Sign up failed: {str(e)}")
 
@@ -114,6 +124,45 @@ def get_batch_progress(batch_id, total_count):
         # The original error object might be complex, so we convert it to a string.
         st.error(f"Error getting batch progress: {str(e)}")
         return total_count, 0
+# Add these new functions anywhere before main_app()
+
+def get_user_active_batch(user_id):
+    """Fetches the active_batch_id from a user's metadata."""
+    try:
+        user_data = supabase.auth.admin.get_user_by_id(user_id).user
+        return user_data.user_metadata.get('active_batch_id')
+    except Exception as e:
+        st.error(f"Error fetching user metadata: {e}")
+        return None
+
+def set_user_active_batch(user_id, batch_id):
+    """Sets the active_batch_id in a user's metadata."""
+    try:
+        supabase.auth.admin.update_user_by_id(
+            user_id,
+            {'user_metadata': {'active_batch_id': batch_id}}
+        )
+    except Exception as e:
+        st.error(f"Error setting active batch: {e}")
+def update_section_progress(batch_id, user_id, new_index):
+    """Updates the user's progress index for their assigned section."""
+    try:
+        supabase.table('section_assignments') \
+                .update({'progress_index': new_index}) \
+                .eq('batch_id', batch_id) \
+                .eq('user_id', user_id) \
+                .execute()
+    except Exception as e:
+        st.warning(f"Could not save progress: {e}")
+def clear_user_active_batch(user_id):
+    """Clears the active_batch_id from a user's metadata."""
+    try:
+        supabase.auth.admin.update_user_by_id(
+            user_id,
+            {'user_metadata': {'active_batch_id': None}}
+        )
+    except Exception as e:
+        st.error(f"Error clearing active batch: {e}")
 
 def get_user_stats(user_email):
     """Get user annotation statistics"""
@@ -221,19 +270,19 @@ def apply_theme():
 def main_app():
     """Main application interface"""
     apply_theme()
-    st.title("🏷️ Comment Annotation Tool")
-    user_email = st.session_state.user.email
-    st.write(f"Welcome, {user_email}!")
+    st.title("💻An2ot8")
+    user = st.session_state.user
+    st.write(f"Welcome, {user.email}!")
     
     with st.sidebar:
-        # Sidebar logic remains the same
+        # Sidebar logic...
         st.subheader("🎨 Theme")
         if st.button("🌙 Dark Mode" if not st.session_state.dark_mode else "☀️ Light Mode"):
             st.session_state.dark_mode = not st.session_state.dark_mode
             st.rerun()
         st.divider()
         st.subheader("👤 User Statistics")
-        total_annotations, label_stats = get_user_stats(user_email)
+        total_annotations, label_stats = get_user_stats(user.email)
         st.metric("Total Annotations", total_annotations)
         if label_stats:
             st.write("**Labels Distribution:**")
@@ -254,20 +303,25 @@ def main_app():
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
-    
-    # Main content area - REWRITTEN LOGIC
+
+    if not st.session_state.get('selected_batch'):
+        active_batch_id = get_user_active_batch(user.id)
+        if active_batch_id:
+            response = supabase.table('batches').select('*').eq('id', active_batch_id).single().execute()
+            st.session_state.selected_batch = response.data
+            st.rerun()
+
     if not st.session_state.selected_batch:
         st.subheader("📁 Select a Batch")
+        # Batch selection logic...
         batches = get_available_batches()
         if not batches:
             st.warning("No batches available.")
             return
-            
         for batch in batches:
             total_count = batch.get('comment_count', 0)
             _, annotated_count = get_batch_progress(batch['id'], total_count)
             progress = annotated_count / total_count if total_count > 0 else 0
-            
             col1, col2, col3 = st.columns([3, 2, 1])
             with col1:
                 st.write(f"**{batch['name']}**")
@@ -278,7 +332,6 @@ def main_app():
             with col3:
                 if st.button("Select", key=f"select_{batch['id']}"):
                     st.session_state.selected_batch = batch
-                    # When a batch is selected, we reset section state and rerun to trigger assignment
                     st.session_state.assigned_section_number = None
                     st.session_state.section_comments = []
                     st.session_state.current_comment_index = 0
@@ -286,54 +339,65 @@ def main_app():
             st.divider()
     
     else:
-        # Annotation interface for a selected batch
         batch = st.session_state.selected_batch
         st.subheader(f"📁 {batch['name']}")
         
-        # Assign section and fetch comments if not already done
         if not st.session_state.section_comments:
-            with st.spinner("Assigning you a new section..."):
-                section_number = get_or_assign_user_section(batch['id'], user_email)
-                if section_number is not None:
-                    st.session_state.assigned_section_number = section_number
+            with st.spinner("Loading your section..."):
+                # CHANGED: RPC now returns a list with a dictionary
+                response = supabase.rpc('assign_section_to_user', {'p_batch_id': batch['id'], 'p_user_id': user.email}).execute()
+                
+                if response.data:
+                    assignment = response.data[0]
+                    section_number = assignment['assigned_section_number']
+                    saved_progress = assignment['saved_progress_index']
+
+                    if not get_user_active_batch(user.id):
+                        set_user_active_batch(user.id, batch['id'])
                     
-                    # We now pass the total count from the batch object to the function.
+                    st.session_state.assigned_section_number = section_number
                     total_comments_in_batch = batch.get('comment_count', 0)
                     comments = get_comments_for_section(batch['id'], section_number, total_comments_in_batch)
 
                     if comments:
                         st.session_state.section_comments = comments
-                        st.session_state.current_comment_index = 0
+                        # CHANGED: Set the comment index from our saved progress
+                        st.session_state.current_comment_index = saved_progress
                         st.rerun()
                     else:
-                        st.success("🎉 No more comments available in this batch!")
-                        return
+                        st.success("🎉 Batch Complete! You can now select another batch.")
+                        clear_user_active_batch(user.id)
+                        st.session_state.selected_batch = None
+                        st.rerun()
                 else:
-                    st.error("Could not assign a section. There may be no comments left.")
-                    return
+                    st.success("🎉 Batch Complete! You can now select another batch.")
+                    clear_user_active_batch(user.id)
+                    st.session_state.selected_batch = None
+                    st.rerun()
 
-        # Display annotation UI if we have comments for the section
         if st.session_state.section_comments:
             total_in_section = len(st.session_state.section_comments)
             
-            # Check if section is completed
             if st.session_state.current_comment_index >= total_in_section:
                 st.success(f"🎉 Section {st.session_state.assigned_section_number} complete!")
                 st.balloons()
-                if st.button("Get Next Section"):
-                    st.session_state.assigned_section_number = None
-                    st.session_state.section_comments = []
-                    st.session_state.current_comment_index = 0
-                    st.rerun()
-                if st.button("🔄 Change Batch"):
-                    st.session_state.selected_batch = None
-                    st.session_state.assigned_section_number = None
-                    st.session_state.section_comments = []
-                    st.session_state.current_comment_index = 0
-                    st.rerun()
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Get Next Section", use_container_width=True):
+                        st.session_state.assigned_section_number = None
+                        st.session_state.section_comments = []
+                        st.session_state.current_comment_index = 0
+                        st.rerun()
+                with col2:
+                    if st.button("🔄 Change Batch", use_container_width=True):
+                        clear_user_active_batch(user.id) # Also clear active batch here
+                        st.session_state.selected_batch = None
+                        st.session_state.assigned_section_number = None
+                        st.session_state.section_comments = []
+                        st.session_state.current_comment_index = 0
+                        st.rerun()
                 return
 
-            # Display progress within the current section
             st.info(f"Annotating Section {st.session_state.assigned_section_number} | Comment {st.session_state.current_comment_index + 1} of {total_in_section}")
             
             current_comment = st.session_state.section_comments[st.session_state.current_comment_index]
@@ -348,18 +412,23 @@ def main_app():
                 submit, skip = st.columns(2)
                 with submit:
                     if st.form_submit_button("✅ Save Annotation", use_container_width=True, type="primary"):
-                        # --- THIS IS THE UPDATED LINE ---
-                        if save_annotation(current_comment['id'], batch['id'], user_email, label, categories, notes):
+                        if save_annotation(current_comment['id'], batch['id'], user.email, label, categories, notes):
                             st.success("Annotation saved!")
-                            st.session_state.current_comment_index += 1
+                            # CHANGED: Update progress in the database
+                            new_index = st.session_state.current_comment_index + 1
+                            update_section_progress(batch['id'], user.email, new_index)
+                            st.session_state.current_comment_index = new_index
                             st.rerun()
                 with skip:
                     if st.form_submit_button("⏭️ Skip For Now", use_container_width=True):
-                        st.session_state.current_comment_index += 1
+                        # CHANGED: Also update progress on skip
+                        new_index = st.session_state.current_comment_index + 1
+                        update_section_progress(batch['id'], user.email, new_index)
+                        st.session_state.current_comment_index = new_index
                         st.rerun()
 def main():
     """Main application entry point"""
-    st.set_page_config(page_title="Comment Annotation Tool", page_icon="🏷️", layout="wide")
+    st.set_page_config(page_title="An2ot8", page_icon="💻", layout="wide")
     init_session_state()
     if not st.session_state.authenticated:
         authenticate_user()
