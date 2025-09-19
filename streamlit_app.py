@@ -406,7 +406,7 @@ def main_app():
             
             with st.form("annotation_form"):
                 label = st.selectbox("Label *", options=['hate', 'non-hate'])
-                categories = st.multiselect("Categories", options=['religion', 'race', 'caste', 'regionalism', 'language', 'body shaming', 'disability', 'age', 'gender', 'sexual', 'political', 'none', 'other'])
+                categories = st.multiselect("Categories", options=['none','religion', 'race', 'caste', 'regionalism', 'terrorism','language', 'body shaming','addiction','disability', 'age', 'gender', 'sexual', 'political', 'privacy', 'cyber bully'])
                 notes = st.text_area("Notes (optional)")
                 
                 submit, skip = st.columns(2)
