@@ -55,7 +55,7 @@ def init_session_state():
 
 def authenticate_user():
     """Supabase authentication"""
-    st.title("💻An2ot8")
+    st.title("💻Hinglish Hate Speech Annotation (An2ot8)")
 
     try:
         user = supabase.auth.get_user()
